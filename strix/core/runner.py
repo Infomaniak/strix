@@ -155,6 +155,7 @@ async def run_strix_scan(
         )
     logger.info("LLM model resolved: %s", resolved_model)
     chat_completions_tools = uses_chat_completions_tool_schema(resolved_model, settings)
+    disable_strict_tool_schema = settings.llm.disable_strict_tool_schema
 
     if coordinator is None:
         coordinator = AgentCoordinator()
@@ -245,6 +246,7 @@ async def run_strix_scan(
             is_whitebox=is_whitebox,
             interactive=interactive,
             chat_completions_tools=chat_completions_tools,
+            disable_strict_tool_schema=disable_strict_tool_schema,
             system_prompt_context=root_context,
             instructions_override=root_instructions,
         )
@@ -263,6 +265,7 @@ async def run_strix_scan(
             is_whitebox=is_whitebox,
             interactive=interactive,
             chat_completions_tools=chat_completions_tools,
+            disable_strict_tool_schema=disable_strict_tool_schema,
             system_prompt_context=scope_context,
         )
 

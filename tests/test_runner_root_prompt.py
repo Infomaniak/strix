@@ -45,6 +45,7 @@ def _patch_engine_scaffold(
             model="openai/gpt-4o",
             reasoning_effort="high",
             force_required_tool_choice=False,
+            disable_strict_tool_schema=False,
             timeout=300,
         )
     )

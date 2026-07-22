@@ -40,6 +40,10 @@ class LlmSettings(BaseSettings):
         default=False,
         alias="STRIX_FORCE_REQUIRED_TOOL_CHOICE",
     )
+    disable_strict_tool_schema: bool = Field(
+        default=False,
+        alias="STRIX_DISABLE_STRICT_TOOL_SCHEMA",
+    )
     timeout: int = Field(default=300, alias="LLM_TIMEOUT")
 
 

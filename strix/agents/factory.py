@@ -121,6 +121,11 @@ def _function_tool_with_error_result(tool: FunctionTool) -> FunctionTool:
     return tool
 
 
+def _disable_strict_json_schema(tool: Tool) -> None:
+    if isinstance(tool, FunctionTool):
+        tool.strict_json_schema = False
+
+
 def _custom_tool_as_function_tool(tool: CustomTool) -> FunctionTool:
     async def invoke(ctx: Any, raw_input: str) -> Any:
         custom_input = _extract_custom_input(tool, raw_input)
@@ -159,12 +164,20 @@ def _custom_tool_as_function_tool(tool: CustomTool) -> FunctionTool:
     )
 
 
-def _configure_chat_completions_filesystem_tools(toolset: Any) -> None:
-    for name, tool in vars(toolset).items():
-        if isinstance(tool, CustomTool):
-            setattr(toolset, name, _custom_tool_as_function_tool(tool))
-        elif isinstance(tool, FunctionTool):
-            setattr(toolset, name, _function_tool_with_error_result(tool))
+def _make_filesystem_configurator(*, disable_strict: bool) -> Any:
+    def configure(toolset: Any) -> None:
+        for name, tool in vars(toolset).items():
+            if isinstance(tool, CustomTool):
+                wrapped: Tool = _custom_tool_as_function_tool(tool)
+            elif isinstance(tool, FunctionTool):
+                wrapped = _function_tool_with_error_result(tool)
+            else:
+                continue
+            if disable_strict:
+                _disable_strict_json_schema(wrapped)
+            setattr(toolset, name, wrapped)
+
+    return configure
 
 
 _CHARS_ESCAPE_RE = re.compile(r"\\(?:u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[0abtnvfr\\])")
@@ -252,7 +265,7 @@ def _wrap_write_stdin(tool: FunctionTool) -> FunctionTool:
     return tool
 
 
-def _configure_shell_tools(toolset: Any, *, chat_completions: bool) -> None:
+def _configure_shell_tools(toolset: Any, *, chat_completions: bool, disable_strict: bool) -> None:
     for name, tool in vars(toolset).items():
         if not isinstance(tool, FunctionTool):
             continue
@@ -263,12 +276,18 @@ def _configure_shell_tools(toolset: Any, *, chat_completions: bool) -> None:
             wrapped = _wrap_write_stdin(wrapped)
         if chat_completions:
             wrapped = _function_tool_with_error_result(wrapped)
+        if disable_strict:
+            _disable_strict_json_schema(wrapped)
         setattr(toolset, name, wrapped)
 
 
-def _make_shell_configurator(*, chat_completions: bool) -> Any:
+def _make_shell_configurator(*, chat_completions: bool, disable_strict: bool) -> Any:
     def configure(toolset: Any) -> None:
-        _configure_shell_tools(toolset, chat_completions=chat_completions)
+        _configure_shell_tools(
+            toolset,
+            chat_completions=chat_completions,
+            disable_strict=disable_strict,
+        )
 
     return configure
 
@@ -408,6 +427,7 @@ def build_strix_agent(
     is_whitebox: bool = False,
     interactive: bool = False,
     chat_completions_tools: bool = False,
+    disable_strict_tool_schema: bool = False,
     system_prompt_context: dict[str, Any] | None = None,
     extra_tools: Sequence[Tool] | None = None,
     instructions_override: str | None = None,
@@ -417,6 +437,9 @@ def build_strix_agent(
     Args:
         chat_completions_tools: Wrap SDK custom tools as function tools
             when the selected backend cannot accept Responses custom tools.
+        disable_strict_tool_schema: Send ``"strict": false`` on every tool
+            definition. Workaround for providers whose guided-decoding
+            backend crashes on strict schemas (e.g. vLLM + GLM-5.2).
         extra_tools: Additional tools for this scan agent only, on top of any
             registered via ``register_agent_tools``.
         instructions_override: Use this verbatim as the system prompt instead
@@ -441,6 +464,10 @@ def build_strix_agent(
         tools = [*_BASE_TOOLS, *agent_tools, agent_finish]
     _ensure_unique_tool_names(tools)
 
+    if disable_strict_tool_schema:
+        for tool in tools:
+            _disable_strict_json_schema(tool)
+
     logger.info(
         "Built %s agent '%s' (skills=%d, tools=%d, scan_mode=%s, whitebox=%s)",
         "root" if is_root else "child",
@@ -460,12 +487,17 @@ def build_strix_agent(
         capabilities=[
             Filesystem(
                 configure_tools=(
-                    _configure_chat_completions_filesystem_tools if chat_completions_tools else None
+                    _make_filesystem_configurator(
+                        disable_strict=disable_strict_tool_schema,
+                    )
+                    if chat_completions_tools
+                    else None
                 ),
             ),
             Shell(
                 configure_tools=_make_shell_configurator(
                     chat_completions=chat_completions_tools,
+                    disable_strict=disable_strict_tool_schema,
                 ),
             ),
         ],
@@ -478,6 +510,7 @@ def make_child_factory(
     is_whitebox: bool = False,
     interactive: bool = False,
     chat_completions_tools: bool = False,
+    disable_strict_tool_schema: bool = False,
     system_prompt_context: dict[str, Any] | None = None,
 ) -> Any:
     """Return the runner-owned builder used by ``spawn_child_agent``.
@@ -496,6 +529,7 @@ def make_child_factory(
             is_whitebox=is_whitebox,
             interactive=interactive,
             chat_completions_tools=chat_completions_tools,
+            disable_strict_tool_schema=disable_strict_tool_schema,
             system_prompt_context=system_prompt_context,
         )
 
